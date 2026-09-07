@@ -1,7 +1,7 @@
 [project]
 name = "bowatt-research-agent-backend"
 version = "0.1.0"
-description = "Backend scaffold for a streaming research agent"
+description = "Backend for a streaming, source-grounded research agent"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -9,6 +9,7 @@ dependencies = [
   "fastapi>=0.115",
   "openai>=2.0",
   "python-multipart>=0.0.20",
+  "tiktoken>=0.12,<1",
   "uvicorn[standard]>=0.34",
 ]
 

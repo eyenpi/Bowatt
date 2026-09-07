@@ -5,7 +5,13 @@ from typing import Protocol
 
 from fastapi import UploadFile
 
-from app.models import IndexedSource, RetrievedChunk, SearchResult, StoredSource
+from app.models import (
+    IndexedSource,
+    RetrievedChunk,
+    SearchPlan,
+    SearchResult,
+    StoredSource,
+)
 
 
 class SourceRepository(Protocol):
@@ -18,6 +24,7 @@ class SourceRepository(Protocol):
         workspace_id: str,
         content_hashes: Sequence[str],
         embedding_model: str,
+        index_signature: str,
     ) -> frozenset[str]: ...
 
     async def save_indexed_sources(self, sources: Sequence[IndexedSource]) -> None: ...
@@ -56,19 +63,24 @@ class SourceRetriever(Protocol):
     ) -> Sequence[RetrievedChunk]: ...
 
 
-class WebSearchProvider(Protocol):
+class ResearchProvider(Protocol):
+    async def create_search_plan(
+        self,
+        request: str,
+        prior_web_context: Sequence[SearchResult],
+        round_number: int,
+    ) -> SearchPlan: ...
+
     async def search(self, query: str, limit: int) -> Sequence[SearchResult]: ...
 
-
-class LanguageModel(Protocol):
-    async def create_search_queries(self, request: str) -> Sequence[str]: ...
-
-    def stream_answer(
+    async def start_answer(
         self,
         request: str,
         uploaded_context: Sequence[RetrievedChunk],
         web_context: Sequence[SearchResult],
     ) -> AsyncIterator[str]: ...
+
+    async def close(self) -> None: ...
 
 
 class ResearchAgent(Protocol):

@@ -37,7 +37,7 @@ def live_api_url() -> Iterator[str]:
                 "BOWATT_DATABASE_PATH": str(Path(temporary_directory) / "research.db"),
                 "BOWATT_CHUNK_SIZE": "32",
                 "BOWATT_CHUNK_OVERLAP": "8",
-                "BOWATT_SCAFFOLD_STREAM_DELAY_SECONDS": "0",
+                "BOWATT_RESEARCH_SEARCH_RETRY_DELAY_SECONDS": "0",
             }
         )
 

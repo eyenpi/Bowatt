@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Sequence
 from email.message import Message
+from http.client import HTTPConnection
 from typing import NamedTuple
 from urllib.error import HTTPError
+from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 import pytest
@@ -136,8 +139,12 @@ def test_upload_then_research_works_over_live_http(live_api_url: str) -> None:
     assert research.headers["Content-Type"].startswith("text/markdown")
     assert research.headers["Transfer-Encoding"].lower() == "chunked"
     assert research.headers["Access-Control-Allow-Origin"] == FRONTEND_ORIGIN
-    assert markdown.startswith("# Backend scaffold ready")
-    assert "**2** uploaded source(s)" in markdown
+    assert markdown.startswith("# Research answer")
+    assert "Uploaded: `notes.txt`" in markdown
+    assert "Uploaded: `facts.md`" in markdown
+    assert "characters 1–12" in markdown
+    assert "characters 1–13" in markdown
+    assert "[Example evidence](https://example.test/evidence)" in markdown
     assert not markdown.startswith("data:")
 
 
@@ -152,7 +159,7 @@ def test_unmodified_frontend_uses_default_workspace(live_api_url: str) -> None:
 
     assert upload.status == 201
     assert research.status == 200
-    assert "**1** uploaded source(s)" in research.body.decode()
+    assert "Uploaded: `default.txt`" in research.body.decode()
 
 
 def test_errors_are_plain_text_for_frontend_display(live_api_url: str) -> None:
@@ -175,3 +182,43 @@ def test_errors_are_plain_text_for_frontend_display(live_api_url: str) -> None:
     assert error.headers["Content-Type"].startswith("text/plain")
     assert body == "image.png is not a supported text file."
 
+
+def test_aborted_http_stream_stops_server_side_generation(live_api_url: str) -> None:
+    before = json.loads(_send(Request(f"{live_api_url}/__test__/provider-state")).body)
+    parsed_url = urlsplit(live_api_url)
+    connection = HTTPConnection(parsed_url.hostname, parsed_url.port, timeout=2)
+    connection.request(
+        "POST",
+        "/api/research",
+        body=json.dumps({"request": "cancel this live stream"}),
+        headers={"Content-Type": "application/json"},
+    )
+    response = connection.getresponse()
+
+    assert response.status == 200
+    assert response.read(1)
+    response.close()
+    connection.close()
+
+    deadline = time.monotonic() + 2
+    state = before
+    while time.monotonic() < deadline:
+        state = json.loads(
+            _send(Request(f"{live_api_url}/__test__/provider-state")).body
+        )
+        if (
+            state["interrupted_answer_streams"]
+            > before["interrupted_answer_streams"]
+            and state["active_answer_streams"] == 0
+        ):
+            break
+        time.sleep(0.02)
+
+    assert state["active_answer_streams"] == 0
+    assert (
+        state["closed_answer_streams"] > before["closed_answer_streams"]
+    )
+    assert (
+        state["interrupted_answer_streams"]
+        > before["interrupted_answer_streams"]
+    )

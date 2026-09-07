@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from app.config import Settings
 from app.container import build_container
 from app.main import create_app
+from app.services.chunking import TextChunker
 from tests.fakes import DeterministicEmbeddingProvider
 
 
@@ -188,3 +189,27 @@ def test_whitespace_source_is_not_embedded_or_stored(
     assert response.text == "empty.txt does not contain indexable text."
     assert embedding_provider.document_calls == []
     assert _database_counts(settings.database_path) == (0, 0)
+
+
+def test_embedding_batches_respect_aggregate_token_budget(settings: Settings) -> None:
+    settings = replace(
+        settings, chunk_size=1, chunk_overlap=0, chunk_max_tokens=8_191,
+        embedding_batch_size=100,
+    )
+    provider = DeterministicEmbeddingProvider()
+    container = build_container(settings, embedding_provider=provider)
+    with TestClient(create_app(settings=settings, container=container)) as client:
+        response = client.post(
+            "/api/sources", files={"files": ("many.txt", b"a" * 100, "text/plain")}
+        )
+    assert response.status_code == 201
+    assert sum(map(len, provider.document_calls)) == 100
+    assert all(
+        len(batch) * settings.chunk_max_tokens <= 300_000
+        for batch in provider.document_calls
+    )
+    tokenizer = TextChunker(1, 0, settings.chunk_max_tokens)
+    assert all(
+        sum(tokenizer.count_tokens(text) for text in batch) <= 300_000
+        for batch in provider.document_calls
+    )

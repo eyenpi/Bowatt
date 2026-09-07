@@ -4,8 +4,13 @@ import re
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, Header, Request, UploadFile, status
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response
+from starlette.requests import ClientDisconnect
 
+from app.api.streaming import (
+    DisconnectAwareStreamingResponse,
+    prepare_stream_until_disconnect,
+)
 from app.config import Settings
 from app.container import AppContainer
 from app.errors import ApiError
@@ -47,7 +52,7 @@ async def health(settings: Annotated[Settings, Depends(get_settings)]) -> Health
         status="ok",
         service=settings.service_name,
         environment=settings.environment,
-        mode="scaffold",
+        mode="agent",
     )
 
 
@@ -76,17 +81,28 @@ async def upload_sources(
 
 @router.post("/api/research")
 async def research(
+    request: Request,
     body: ResearchRequest,
     workspace_id: Annotated[str, Depends(get_workspace_id)],
     container: Annotated[AppContainer, Depends(get_container)],
-) -> StreamingResponse:
-    stream = await container.research_agent.prepare_answer(workspace_id, body.request)
-    return StreamingResponse(
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> Response:
+    try:
+        stream = await prepare_stream_until_disconnect(
+            request,
+            container.research_agent.prepare_answer(workspace_id, body.request),
+            close_timeout_seconds=settings.research_stream_close_timeout_seconds,
+        )
+    except ClientDisconnect:
+        return Response(status_code=499)
+
+    return DisconnectAwareStreamingResponse(
         stream,
         media_type="text/markdown",
+        close_timeout_seconds=settings.research_stream_close_timeout_seconds,
         headers={
             "Cache-Control": "no-store",
             "X-Content-Type-Options": "nosniff",
-            "X-Research-Agent-Mode": "scaffold",
+            "X-Research-Agent-Mode": "agent",
         },
     )

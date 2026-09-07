@@ -16,5 +16,14 @@ class EmbeddingProviderError(Exception):
         self.status_code = status_code
 
 
+class ResearchProviderError(Exception):
+    """A normalized planning, search, or generation provider failure."""
+
+    def __init__(self, message: str, *, status_code: int = 502) -> None:
+        super().__init__(message)
+        self.public_message = message
+        self.status_code = status_code
+
+
 class StorageError(Exception):
     """Raised when persisted source or vector data is inconsistent."""

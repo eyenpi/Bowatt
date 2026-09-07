@@ -1,7 +1,15 @@
 from fastapi.testclient import TestClient
 
+from app.config import Settings
+from app.container import build_container
+from app.main import create_app
+from tests.fakes import DeterministicEmbeddingProvider, FakeResearchProvider
 
-def test_research_returns_raw_markdown_stream(client: TestClient) -> None:
+
+def test_research_returns_grounded_raw_markdown_stream(
+    client: TestClient,
+    research_provider: FakeResearchProvider,
+) -> None:
     client.post(
         "/api/sources",
         headers={"X-Workspace-ID": "browser-one"},
@@ -18,9 +26,12 @@ def test_research_returns_raw_markdown_stream(client: TestClient) -> None:
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/markdown")
-    assert response.headers["x-research-agent-mode"] == "scaffold"
-    assert body.startswith("# Backend scaffold ready")
-    assert "**1** uploaded source(s)" in body
+    assert response.headers["x-research-agent-mode"] == "agent"
+    assert body.startswith("# Research answer")
+    assert "## Sources" in body
+    assert "[U1] Uploaded: `notes.txt` (chunk 1, characters 1–15)" in body
+    assert "[W1] [Example evidence](https://example.test/evidence)" in body
+    assert research_provider.answer_calls[0][1][0].chunk.source_name == "notes.txt"
 
 
 def test_sources_are_isolated_by_workspace(client: TestClient) -> None:
@@ -37,7 +48,7 @@ def test_sources_are_isolated_by_workspace(client: TestClient) -> None:
     )
 
     assert response.status_code == 200
-    assert "**0** uploaded source(s)" in response.text
+    assert "private.txt" not in response.text
 
 
 def test_research_rejects_blank_requests(client: TestClient) -> None:
@@ -46,3 +57,18 @@ def test_research_rejects_blank_requests(client: TestClient) -> None:
     assert response.status_code == 400
     assert response.text == "Research request must not be blank."
 
+
+def test_research_reports_missing_provider_configuration(settings: Settings) -> None:
+    container = build_container(
+        settings,
+        embedding_provider=DeterministicEmbeddingProvider(),
+    )
+
+    with TestClient(create_app(settings=settings, container=container)) as test_client:
+        response = test_client.post(
+            "/api/research",
+            json={"request": "Find current evidence"},
+        )
+
+    assert response.status_code == 503
+    assert response.text == "Research provider is not configured. Set OPENAI_API_KEY."

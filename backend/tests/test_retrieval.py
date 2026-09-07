@@ -10,7 +10,7 @@ from app.config import Settings
 from app.container import AppContainer, build_container
 from app.errors import ApiError
 from app.main import create_app
-from tests.fakes import DeterministicEmbeddingProvider
+from tests.fakes import DeterministicEmbeddingProvider, FakeResearchProvider
 
 
 def test_retrieval_embeds_query_once_and_ranks_related_source_first(
@@ -58,7 +58,11 @@ def test_sources_and_vectors_survive_application_restart(
     settings: Settings,
 ) -> None:
     first_provider = DeterministicEmbeddingProvider()
-    first_container = build_container(settings, embedding_provider=first_provider)
+    first_container = build_container(
+        settings,
+        embedding_provider=first_provider,
+        research_provider=FakeResearchProvider(),
+    )
     with TestClient(create_app(settings=settings, container=first_container)) as first_client:
         upload = first_client.post(
             "/api/sources",
@@ -69,7 +73,11 @@ def test_sources_and_vectors_survive_application_restart(
     assert first_provider.closed is True
 
     restarted_provider = DeterministicEmbeddingProvider()
-    restarted_container = build_container(settings, embedding_provider=restarted_provider)
+    restarted_container = build_container(
+        settings,
+        embedding_provider=restarted_provider,
+        research_provider=FakeResearchProvider(),
+    )
     restarted_app = create_app(settings=settings, container=restarted_container)
     with TestClient(restarted_app) as restarted_client:
         response = restarted_client.post(
@@ -84,7 +92,7 @@ def test_sources_and_vectors_survive_application_restart(
         )
 
     assert response.status_code == 200
-    assert "**1** uploaded source(s)" in response.text
+    assert "Uploaded: `durable.txt`" in response.text
     assert results[0].chunk.source_name == "durable.txt"
 
 
@@ -113,7 +121,11 @@ def test_dimension_mismatch_returns_safe_retrieval_error(
 def test_same_source_is_reembedded_after_embedding_model_change(settings: Settings) -> None:
     content = b"model migration source"
     first_provider = DeterministicEmbeddingProvider(model_name="embedding-v1")
-    first_container = build_container(settings, embedding_provider=first_provider)
+    first_container = build_container(
+        settings,
+        embedding_provider=first_provider,
+        research_provider=FakeResearchProvider(),
+    )
     with TestClient(create_app(settings=settings, container=first_container)) as first_client:
         assert (
             first_client.post(
@@ -125,7 +137,11 @@ def test_same_source_is_reembedded_after_embedding_model_change(settings: Settin
 
     second_settings = replace(settings, embedding_model="embedding-v2")
     second_provider = DeterministicEmbeddingProvider(model_name="embedding-v2")
-    second_container = build_container(second_settings, embedding_provider=second_provider)
+    second_container = build_container(
+        second_settings,
+        embedding_provider=second_provider,
+        research_provider=FakeResearchProvider(),
+    )
     with TestClient(
         create_app(settings=second_settings, container=second_container)
     ) as second_client:

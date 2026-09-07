@@ -27,6 +27,10 @@ class SourceIngestionService:
         self._repository = repository
         self._embedding_provider = embedding_provider
         self._chunker = chunker
+        self._index_signature = (
+            f"{chunker.signature}:{embedding_provider.model_name}:"
+            f"dimensions={settings.embedding_dimensions}"
+        )
         self._ingestion_lock = asyncio.Lock()
 
     async def ingest(
@@ -58,6 +62,7 @@ class SourceIngestionService:
             workspace_id,
             tuple(source.content_hash for source in unique_sources),
             self._embedding_provider.model_name,
+            self._index_signature,
         )
         new_sources = tuple(
             source for source in unique_sources if source.content_hash not in existing_hashes
@@ -68,7 +73,7 @@ class SourceIngestionService:
         grouped_chunks: list[tuple[StoredSource, tuple[SourceChunk, ...]]] = []
         all_chunks: list[SourceChunk] = []
         for source in new_sources:
-            chunks = self._chunker.chunk(source)
+            chunks = await asyncio.to_thread(self._chunker.chunk, source)
             if not chunks:
                 raise ApiError(400, f"{source.name} does not contain indexable text.")
             grouped_chunks.append((source, chunks))
@@ -85,6 +90,7 @@ class SourceIngestionService:
                     chunks=chunks,
                     embeddings=embeddings[offset:next_offset],
                     embedding_model=self._embedding_provider.model_name,
+                    index_signature=self._index_signature,
                 )
             )
             offset = next_offset
@@ -94,9 +100,14 @@ class SourceIngestionService:
     async def _embed_chunks(
         self, chunks: Sequence[SourceChunk]
     ) -> tuple[tuple[float, ...], ...]:
+        # Also respect the provider's aggregate 300,000-token request limit.
+        batch_size = min(
+            self._settings.embedding_batch_size,
+            300_000 // self._settings.chunk_max_tokens,
+        )
         batches = tuple(
-            chunks[index : index + self._settings.embedding_batch_size]
-            for index in range(0, len(chunks), self._settings.embedding_batch_size)
+            chunks[index : index + batch_size]
+            for index in range(0, len(chunks), batch_size)
         )
         semaphore = asyncio.Semaphore(self._settings.embedding_concurrency)
 
@@ -105,7 +116,7 @@ class SourceIngestionService:
         ) -> Sequence[Sequence[float]]:
             async with semaphore:
                 return await self._embedding_provider.embed_documents(
-                    tuple(chunk.text for chunk in batch)
+                    tuple(chunk.embedding_text for chunk in batch)
                 )
 
         try:

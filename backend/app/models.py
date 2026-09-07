@@ -43,6 +43,21 @@ class SourceChunk:
     workspace_id: str
     index: int
     text: str
+    heading_path: tuple[str, ...] = ()
+    start_offset: int | None = None
+    end_offset: int | None = None
+    context_prefix: str = ""
+
+    @property
+    def embedding_text(self) -> str:
+        return self.context_prefix + self.text
+
+    @property
+    def location(self) -> str:
+        location = f"chunk {self.index + 1}"
+        if self.start_offset is not None and self.end_offset is not None:
+            location += f", characters {self.start_offset + 1}–{self.end_offset}"
+        return location
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +65,12 @@ class SearchResult:
     title: str
     url: str
     snippet: str
+
+
+@dataclass(frozen=True, slots=True)
+class SearchPlan:
+    queries: tuple[str, ...]
+    is_complete: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,3 +85,4 @@ class IndexedSource:
     chunks: tuple[SourceChunk, ...]
     embeddings: tuple[tuple[float, ...], ...]
     embedding_model: str
+    index_signature: str = ""

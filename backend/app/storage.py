@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import math
 import struct
 from collections.abc import Sequence
@@ -20,6 +21,7 @@ CREATE TABLE IF NOT EXISTS sources (
     media_type TEXT NOT NULL,
     content TEXT NOT NULL,
     content_hash TEXT NOT NULL,
+    index_signature TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (workspace_id, content_hash)
 );
@@ -32,6 +34,10 @@ CREATE TABLE IF NOT EXISTS chunks (
     embedding BLOB NOT NULL,
     embedding_dimensions INTEGER NOT NULL,
     embedding_model TEXT NOT NULL,
+    heading_path TEXT NOT NULL DEFAULT '[]',
+    start_offset INTEGER,
+    end_offset INTEGER,
+    context_prefix TEXT NOT NULL DEFAULT '',
     UNIQUE (source_id, chunk_index)
 );
 
@@ -86,6 +92,24 @@ class SqliteSourceRepository:
         async with self._connect() as database:
             await database.execute("PRAGMA journal_mode=WAL")
             await database.executescript(SCHEMA)
+            # Add metadata to existing databases without replacing stored sources.
+            await database.execute("BEGIN IMMEDIATE")
+            for table, additions in (
+                ("sources", {"index_signature": "TEXT NOT NULL DEFAULT ''"}),
+                ("chunks", {
+                    "heading_path": "TEXT NOT NULL DEFAULT '[]'",
+                    "start_offset": "INTEGER",
+                    "end_offset": "INTEGER",
+                    "context_prefix": "TEXT NOT NULL DEFAULT ''",
+                }),
+            ):
+                cursor = await database.execute(f"PRAGMA table_info({table})")
+                existing = {row[1] for row in await cursor.fetchall()}
+                for column, definition in additions.items():
+                    if column not in existing:
+                        await database.execute(
+                            f"ALTER TABLE {table} ADD COLUMN {column} {definition}"
+                        )
             await database.commit()
 
     async def close(self) -> None:
@@ -96,6 +120,7 @@ class SqliteSourceRepository:
         workspace_id: str,
         content_hashes: Sequence[str],
         embedding_model: str,
+        index_signature: str,
     ) -> frozenset[str]:
         if not content_hashes:
             return frozenset()
@@ -107,9 +132,10 @@ class SqliteSourceRepository:
             JOIN chunks ON chunks.source_id = sources.id
             WHERE sources.workspace_id = ?
               AND chunks.embedding_model = ?
+              AND sources.index_signature = ?
               AND sources.content_hash IN ({placeholders})
         """
-        parameters = (workspace_id, embedding_model, *content_hashes)
+        parameters = (workspace_id, embedding_model, index_signature, *content_hashes)
 
         async with self._connect() as database:
             cursor = await database.execute(query, parameters)
@@ -130,13 +156,15 @@ class SqliteSourceRepository:
                     await database.execute(
                         """
                         INSERT INTO sources (
-                            workspace_id, name, size, media_type, content, content_hash
-                        ) VALUES (?, ?, ?, ?, ?, ?)
+                            workspace_id, name, size, media_type, content, content_hash,
+                            index_signature
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?)
                         ON CONFLICT(workspace_id, content_hash) DO UPDATE SET
                             name = excluded.name,
                             size = excluded.size,
                             media_type = excluded.media_type,
-                            content = excluded.content
+                            content = excluded.content,
+                            index_signature = excluded.index_signature
                         """,
                         (
                             source.workspace_id,
@@ -145,6 +173,7 @@ class SqliteSourceRepository:
                             source.media_type,
                             source.content,
                             source.content_hash,
+                            indexed_source.index_signature,
                         ),
                     )
                     cursor = await database.execute(
@@ -165,8 +194,12 @@ class SqliteSourceRepository:
                             text,
                             embedding,
                             embedding_dimensions,
-                            embedding_model
-                        ) VALUES (?, ?, ?, ?, ?, ?)
+                            embedding_model,
+                            heading_path,
+                            start_offset,
+                            end_offset,
+                            context_prefix
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         [
                             (
@@ -176,6 +209,10 @@ class SqliteSourceRepository:
                                 _encode_vector(vector),
                                 len(vector),
                                 indexed_source.embedding_model,
+                                json.dumps(chunk.heading_path),
+                                chunk.start_offset,
+                                chunk.end_offset,
+                                chunk.context_prefix,
                             )
                             for chunk, vector in zip(
                                 indexed_source.chunks,
@@ -231,7 +268,11 @@ class SqliteSourceRepository:
                     chunks.chunk_index,
                     chunks.text,
                     chunks.embedding,
-                    chunks.embedding_dimensions
+                    chunks.embedding_dimensions,
+                    chunks.heading_path,
+                    chunks.start_offset,
+                    chunks.end_offset,
+                    chunks.context_prefix
                 FROM chunks
                 JOIN sources ON sources.id = chunks.source_id
                 WHERE sources.workspace_id = ? AND chunks.embedding_model = ?
@@ -248,6 +289,10 @@ class SqliteSourceRepository:
                     workspace_id=str(row[2]),
                     index=int(row[3]),
                     text=str(row[4]),
+                    heading_path=tuple(json.loads(row[7])),
+                    start_offset=row[8],
+                    end_offset=row[9],
+                    context_prefix=str(row[10]),
                 ),
                 _decode_vector(bytes(row[5]), int(row[6])),
             )
@@ -257,4 +302,3 @@ class SqliteSourceRepository:
 
     def _connect(self) -> aiosqlite.Connection:
         return aiosqlite.connect(self._database_path)
-
