@@ -4,6 +4,7 @@ import os
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -25,58 +26,62 @@ def _available_port() -> int:
 def live_api_url() -> Iterator[str]:
     port = _available_port()
     base_url = f"http://127.0.0.1:{port}"
-    environment = os.environ.copy()
-    environment.update(
-        {
-            "BOWATT_ENVIRONMENT": "integration-test",
-            "BOWATT_HOST": "127.0.0.1",
-            "BOWATT_PORT": str(port),
-            "BOWATT_CORS_ORIGINS": "http://localhost:5173",
-        }
-    )
+    with tempfile.TemporaryDirectory(prefix="bowatt-integration-") as temporary_directory:
+        environment = os.environ.copy()
+        environment.update(
+            {
+                "BOWATT_ENVIRONMENT": "integration-test",
+                "BOWATT_HOST": "127.0.0.1",
+                "BOWATT_PORT": str(port),
+                "BOWATT_CORS_ORIGINS": "http://localhost:5173",
+                "BOWATT_DATABASE_PATH": str(Path(temporary_directory) / "research.db"),
+                "BOWATT_CHUNK_SIZE": "32",
+                "BOWATT_CHUNK_OVERLAP": "8",
+                "BOWATT_SCAFFOLD_STREAM_DELAY_SECONDS": "0",
+            }
+        )
 
-    process = subprocess.Popen(
-        [
-            sys.executable,
-            "-m",
-            "uvicorn",
-            "app.main:app",
-            "--host",
-            "127.0.0.1",
-            "--port",
-            str(port),
-            "--log-level",
-            "warning",
-        ],
-        cwd=BACKEND_ROOT,
-        env=environment,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+        process = subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "uvicorn",
+                "tests.live_app:app",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                str(port),
+                "--log-level",
+                "warning",
+            ],
+            cwd=BACKEND_ROOT,
+            env=environment,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
 
-    deadline = time.monotonic() + 5
-    while time.monotonic() < deadline:
-        if process.poll() is not None:
-            raise RuntimeError(f"Integration server exited with code {process.returncode}.")
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            if process.poll() is not None:
+                raise RuntimeError(f"Integration server exited with code {process.returncode}.")
 
-        try:
-            with urlopen(f"{base_url}/health", timeout=0.25) as response:
-                if response.status == 200:
-                    break
-        except (TimeoutError, URLError):
-            time.sleep(0.05)
-    else:
-        process.terminate()
-        process.wait(timeout=2)
-        raise RuntimeError("Integration server did not become ready within five seconds.")
-
-    try:
-        yield base_url
-    finally:
-        process.terminate()
-        try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            process.kill()
+            try:
+                with urlopen(f"{base_url}/health", timeout=0.25) as response:
+                    if response.status == 200:
+                        break
+            except (TimeoutError, URLError):
+                time.sleep(0.05)
+        else:
+            process.terminate()
             process.wait(timeout=2)
+            raise RuntimeError("Integration server did not become ready within five seconds.")
 
+        try:
+            yield base_url
+        finally:
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait(timeout=2)

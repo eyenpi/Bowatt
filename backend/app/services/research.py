@@ -40,5 +40,5 @@ class ScaffoldResearchAgent:
         )
 
         for chunk in chunks:
-            await asyncio.sleep(2)  # Simulate async processing delay
+            await asyncio.sleep(self._settings.scaffold_stream_delay_seconds)
             yield chunk

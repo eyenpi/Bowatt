@@ -57,3 +57,10 @@ class RetrievedChunk:
     chunk: SourceChunk
     score: float
 
+
+@dataclass(frozen=True, slots=True)
+class IndexedSource:
+    source: StoredSource
+    chunks: tuple[SourceChunk, ...]
+    embeddings: tuple[tuple[float, ...], ...]
+    embedding_model: str

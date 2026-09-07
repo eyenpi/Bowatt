@@ -5,13 +5,32 @@ from typing import Protocol
 
 from fastapi import UploadFile
 
-from app.models import RetrievedChunk, SearchResult, SourceChunk, StoredSource
+from app.models import IndexedSource, RetrievedChunk, SearchResult, StoredSource
 
 
 class SourceRepository(Protocol):
-    async def save_many(self, sources: Sequence[StoredSource]) -> None: ...
+    async def initialize(self) -> None: ...
+
+    async def close(self) -> None: ...
+
+    async def existing_hashes(
+        self,
+        workspace_id: str,
+        content_hashes: Sequence[str],
+        embedding_model: str,
+    ) -> frozenset[str]: ...
+
+    async def save_indexed_sources(self, sources: Sequence[IndexedSource]) -> None: ...
 
     async def list_for_workspace(self, workspace_id: str) -> Sequence[StoredSource]: ...
+
+    async def search(
+        self,
+        workspace_id: str,
+        vector: Sequence[float],
+        embedding_model: str,
+        limit: int,
+    ) -> Sequence[RetrievedChunk]: ...
 
 
 class SourceIngestor(Protocol):
@@ -21,20 +40,19 @@ class SourceIngestor(Protocol):
 
 
 class EmbeddingProvider(Protocol):
+    @property
+    def model_name(self) -> str: ...
+
     async def embed_documents(self, texts: Sequence[str]) -> Sequence[Sequence[float]]: ...
 
     async def embed_query(self, text: str) -> Sequence[float]: ...
 
+    async def close(self) -> None: ...
 
-class VectorStore(Protocol):
-    async def add(
-        self,
-        chunks: Sequence[SourceChunk],
-        vectors: Sequence[Sequence[float]],
-    ) -> None: ...
 
-    async def search(
-        self, workspace_id: str, vector: Sequence[float], limit: int
+class SourceRetriever(Protocol):
+    async def retrieve(
+        self, workspace_id: str, query: str, limit: int | None = None
     ) -> Sequence[RetrievedChunk]: ...
 
 

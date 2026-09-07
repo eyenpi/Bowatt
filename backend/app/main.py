@@ -22,12 +22,17 @@ def create_app(
     container: AppContainer | None = None,
 ) -> FastAPI:
     resolved_settings = settings or Settings.from_environment()
+    resolved_container = container or build_container(resolved_settings)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.settings = resolved_settings
-        app.state.container = container or build_container(resolved_settings)
-        yield
+        app.state.container = resolved_container
+        await resolved_container.initialize()
+        try:
+            yield
+        finally:
+            await resolved_container.close()
 
     application = FastAPI(
         title=resolved_settings.service_name,
@@ -64,4 +69,3 @@ def create_app(
 
 
 app = create_app()
-
