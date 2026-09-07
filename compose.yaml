@@ -1,0 +1,56 @@
+name: bowatt
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+      target: runtime
+    env_file:
+      - path: backend/.env
+        required: false
+    environment:
+      BOWATT_DATABASE_PATH: /app/data/research.db
+    volumes:
+      - research-data:/app/data
+    expose:
+      - "8787"
+    init: true
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8787/health', timeout=2)"
+      interval: 5s
+      timeout: 3s
+      start_period: 10s
+      retries: 12
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+    ports:
+      - "127.0.0.1:${BOWATT_WEB_PORT:-5173}:8080"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/"]
+      interval: 5s
+      timeout: 3s
+      start_period: 5s
+      retries: 12
+
+  backend-tests:
+    profiles: [test]
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+      target: test
+    environment:
+      OPENAI_API_KEY: ""
+
+volumes:
+  research-data:

@@ -1,0 +1,26 @@
+# Used by docker/test.sh in its own temporary Compose project.
+services:
+  backend:
+    build:
+      target: test
+    env_file: !reset []
+    environment:
+      OPENAI_API_KEY: ""
+      BOWATT_TEST_STREAM_DELAY: "0.1"
+    command: ["uvicorn", "tests.live_app:app", "--host", "0.0.0.0", "--port", "8787"]
+
+  frontend:
+    # Let Docker choose an unused localhost port for this test project.
+    ports: !override ["127.0.0.1::8080"]
+
+  smoke-tests:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+      target: test
+    command: ["python", "smoke_test.py"]
+    environment:
+      OPENAI_API_KEY: ""
+    depends_on:
+      frontend:
+        condition: service_healthy

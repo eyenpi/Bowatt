@@ -1,44 +1,16 @@
-# Research Agent Frontend
+# Frontend
 
-Small React + TypeScript frontend for the AI Engineer research-agent tech test, bootstrapped with Vite.
+React + TypeScript + Vite. Requires Node.js 22.12+.
 
-The app lets a user:
-
-- enter a research request
-- upload source files
-- view a streamed markdown response
-
-## Setup
-
-Install dependencies:
+From the repository root:
 
 ```sh
-npm install
-```
-
-Run the frontend locally:
-
-```sh
+cd frontend
+npm ci
 npm run dev
 ```
 
-Vite will print the local URL, usually `http://localhost:5173/`.
+Open [localhost:5173](http://localhost:5173). The API defaults to
+`http://localhost:8787`; override it with `VITE_API_BASE_URL`.
 
-## Backend API
-
-By default, the frontend calls:
-
-```txt
-http://localhost:8787
-```
-
-Set a different backend URL with:
-
-```sh
-VITE_API_BASE_URL=http://localhost:8787 npm run dev
-```
-
-Expected endpoints:
-
-- `POST /api/research` — accepts JSON `{ "request": "..." }` and returns a streamed markdown response.
-- `POST /api/sources` — accepts multipart form uploads under the repeated field name `files`.
+Checks: `npm run lint` and `npm run build`.

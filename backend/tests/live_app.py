@@ -1,3 +1,5 @@
+import os
+
 from app.config import Settings
 from app.container import build_container
 from app.main import create_app
@@ -7,7 +9,7 @@ settings = Settings.from_environment()
 research_provider = FakeResearchProvider(
     answer_chunks=("# Research answer\n\n",)
     + tuple(f"Stream segment {index}.\n" for index in range(20)),
-    answer_chunk_delay_seconds=0.01,
+    answer_chunk_delay_seconds=float(os.getenv("BOWATT_TEST_STREAM_DELAY", "0.01")),
 )
 container = build_container(
     settings,
