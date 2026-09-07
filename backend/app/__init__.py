@@ -1,0 +1,2 @@
+"""Bowatt research-agent backend."""
+
